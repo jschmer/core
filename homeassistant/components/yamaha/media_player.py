@@ -40,6 +40,7 @@ ATTR_PORT = "port"
 
 ATTR_SCENE = "scene"
 
+CONF_SOUND_MODE_IGNORE = "sound_mode_ignore"
 CONF_SOURCE_IGNORE = "source_ignore"
 CONF_SOURCE_NAMES = "source_names"
 CONF_ZONE_IGNORE = "zone_ignore"
@@ -65,6 +66,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_SOURCE_IGNORE, default=[]): vol.All(
             cv.ensure_list, [cv.string]
         ),
+        vol.Optional(CONF_SOUND_MODE_IGNORE, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
         vol.Optional(CONF_ZONE_IGNORE, default=[]): vol.All(
             cv.ensure_list, [cv.string]
         ),
@@ -83,6 +87,7 @@ class YamahaConfigInfo:
         self.host = config.get(CONF_HOST)
         self.ctrl_url = f"http://{self.host}:80/YamahaRemoteControl/ctrl"
         self.source_ignore = config.get(CONF_SOURCE_IGNORE)
+        self.sound_mode_ignore = config.get(CONF_SOUND_MODE_IGNORE)
         self.source_names = config.get(CONF_SOURCE_NAMES)
         self.zone_ignore = config.get(CONF_ZONE_IGNORE)
         self.zone_names = config.get(CONF_ZONE_NAMES)
@@ -137,6 +142,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         entity = YamahaDevice(
             config_info.name,
             receiver,
+            config_info.sound_mode_ignore,
             config_info.source_ignore,
             config_info.source_names,
             config_info.zone_names,
@@ -169,7 +175,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 class YamahaDevice(MediaPlayerEntity):
     """Representation of a Yamaha device."""
 
-    def __init__(self, name, receiver, source_ignore, source_names, zone_names):
+    def __init__(
+        self, name, receiver, sound_mode_ignore, source_ignore, source_names, zone_names
+    ):
         """Initialize the Yamaha Receiver."""
         self.receiver = receiver
         self._muted = False
@@ -179,6 +187,7 @@ class YamahaDevice(MediaPlayerEntity):
         self._sound_mode = None
         self._sound_mode_list = None
         self._source_list = None
+        self._sound_mode_ignore = sound_mode_ignore or []
         self._source_ignore = source_ignore or []
         self._source_names = source_names or {}
         self._zone_names = zone_names or {}
@@ -277,7 +286,12 @@ class YamahaDevice(MediaPlayerEntity):
     @property
     def sound_mode_list(self):
         """Return the current sound mode."""
-        return self._sound_mode_list
+        if self._sound_mode_list:
+            return [
+                x for x in self._sound_mode_list if x not in self._sound_mode_ignore
+            ]
+        else:
+            return None
 
     @property
     def source_list(self):

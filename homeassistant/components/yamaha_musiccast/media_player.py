@@ -48,6 +48,8 @@ SUPPORTED_FEATURES = (
 
 KNOWN_HOSTS_KEY = "data_yamaha_musiccast"
 INTERVAL_SECONDS = "interval_seconds"
+CONF_SOURCE_IGNORE = "source_ignore"
+CONF_SOURCE_NAMES = "source_names"
 
 DEFAULT_PORT = 5005
 DEFAULT_INTERVAL = 480
@@ -57,6 +59,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Required(CONF_HOST): cv.string,
         vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
         vol.Optional(INTERVAL_SECONDS, default=DEFAULT_INTERVAL): cv.positive_int,
+        vol.Optional(CONF_SOURCE_IGNORE, default=[]): vol.All(
+            cv.ensure_list, [cv.string]
+        ),
+        vol.Optional(CONF_SOURCE_NAMES, default={}): {cv.string: cv.string},
     }
 )
 
@@ -72,6 +78,8 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     host = config.get(CONF_HOST)
     port = config.get(CONF_PORT)
     interval = config.get(INTERVAL_SECONDS)
+    source_ignore = config.get(CONF_SOURCE_IGNORE)
+    source_names = config.get(CONF_SOURCE_NAMES)
 
     # Get IP of host to prevent duplicates
     try:
@@ -100,7 +108,14 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     if receiver:
         for zone in receiver.zones:
             _LOGGER.debug("Receiver: %s / Port: %d / Zone: %s", receiver, port, zone)
-            add_entities([YamahaDevice(receiver, receiver.zones[zone])], True)
+            add_entities(
+                [
+                    YamahaDevice(
+                        receiver, receiver.zones[zone], source_ignore, source_names
+                    )
+                ],
+                True,
+            )
     else:
         known_hosts.remove(reg_host)
 
@@ -108,7 +123,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 class YamahaDevice(MediaPlayerEntity):
     """Representation of a Yamaha MusicCast device."""
 
-    def __init__(self, recv, zone):
+    def __init__(self, recv, zone, source_ignore, source_names):
         """Initialize the Yamaha MusicCast device."""
         self._recv = recv
         self._name = recv.name
@@ -124,6 +139,11 @@ class YamahaDevice(MediaPlayerEntity):
         self.volume_max = 0
         self._recv.set_yamaha_device(self)
         self._zone.set_yamaha_device(self)
+        self._source_ignore = source_ignore or []
+        self._source_names = source_names or {}
+        self._source_names_rev = {
+            alias: source for source, alias in self._source_names.items()
+        }
 
     @property
     def name(self):
@@ -155,12 +175,20 @@ class YamahaDevice(MediaPlayerEntity):
     @property
     def source(self):
         """Return the current input source."""
-        return self._source
+        return self._source_names.get(self._source, self._source)
 
     @property
     def source_list(self):
         """List of available input sources."""
-        return self._source_list
+        return (
+            [
+                self._source_names.get(x, x)
+                for x in self._source_list
+                if x not in self._source_ignore
+            ]
+            if self._source_list
+            else None
+        )
 
     @source_list.setter
     def source_list(self, value):
@@ -278,9 +306,10 @@ class YamahaDevice(MediaPlayerEntity):
         _LOGGER.debug("Volume level: %.2f / %d", volume, volume * self.volume_max)
         self._zone.set_volume(volume * self.volume_max)
 
-    def select_source(self, source):
+    def select_source(self, source_alias):
         """Send the media player the command to select input source."""
-        _LOGGER.debug("select_source: %s", source)
+        source = self._source_names_rev.get(source_alias, source_alias)
+        _LOGGER.debug("select_source: %s (%s)", source_alias, source)
         self.status = STATE_UNKNOWN
         self._zone.set_input(source)
 
